@@ -1,2 +1,6 @@
-# Secret_Chatroom
+## Secret_Chatroom
 An end-to-end 2048-bit RSA encrypted messenger
+
+##Execution
+* Run `npm start` under the terminal
+* Open `http://localhost:3000` in the web broser

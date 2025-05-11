@@ -1,48 +1,83 @@
-self.window = self // This is required for the jsencrypt library to work within the web worker
-
-// Import the jsencrypt library
-self.importScripts('https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/2.3.1/jsencrypt.min.js');
-
-let crypt = null
 let privateKey = null
 
-/** Webworker onmessage listener */
-onmessage = function(e) {
-  const [ messageType, messageId, text, key ] = e.data
+// Worker receives instructions from the main thread
+onmessage = async function (e) {
+  const [messageType, messageId, text, key] = e.data
   let result
-  switch (messageType) {
-    case 'generate-keys':
-      result = generateKeypair()
-      break
-    case 'encrypt':
-      result = encrypt(text, key)
-      break
-    case 'decrypt':
-      result = decrypt(text)
-      break
+
+  try {
+    switch (messageType) {
+      case 'generate-keys':
+        result = await generateKeypair()
+        break
+      case 'encrypt':
+        result = await encrypt(text, key)
+        break
+      case 'decrypt':
+        result = await decrypt(text)
+        break
+    }
+  } catch (err) {
+    result = `ERROR: ${err.message}`
   }
 
-  // Return result to the UI thread
-  postMessage([ messageId, result ])
+  // 将结果返回给主线程
+  postMessage([messageId, result])
 }
 
-/** Generate and store keypair */
-function generateKeypair () {
-  crypt = new JSEncrypt({default_key_size: 2056})
-  privateKey = crypt.getPrivateKey()
+/** Generate the RSA-OAEP key pair and return the Base64-encoded public key */
+async function generateKeypair() {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: 'RSA-OAEP',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
+    true,
+    ['encrypt', 'decrypt']
+  )
 
-  // Only return the public key, keep the private key hidden
-  return crypt.getPublicKey()
+  privateKey = keyPair.privateKey
+
+  const exportedPublicKey = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+  const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedPublicKey)))
+
+  return publicKeyBase64
 }
 
-/** Encrypt the provided string with the destination public key */
-function encrypt (content, publicKey) {
-  crypt.setKey(publicKey)
-  return crypt.encrypt(content)
+/** Encrypt the plaintext with the other party's public key and return the Base64 ciphertext */
+async function encrypt(content, publicKeyBase64) {
+  const publicKeyDer = Uint8Array.from(atob(publicKeyBase64), c => c.charCodeAt(0))
+
+  const publicKey = await crypto.subtle.importKey(
+    'spki',
+    publicKeyDer,
+    {
+      name: 'RSA-OAEP',
+      hash: 'SHA-256',
+    },
+    false,
+    ['encrypt']
+  )
+
+  const encoded = new TextEncoder().encode(content)
+  const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, encoded)
+
+  return btoa(String.fromCharCode(...new Uint8Array(encrypted)))
 }
 
-/** Decrypt the provided string with the local private key */
-function decrypt (content) {
-  crypt.setKey(privateKey)
-  return crypt.decrypt(content)
+/** Decrypts the Base64 ciphertext with the local private key and returns the plaintext */
+async function decrypt(base64Ciphertext) {
+  if (!privateKey) throw new Error('Private key not initialized.')
+
+  const ciphertext = Uint8Array.from(atob(base64Ciphertext), c => c.charCodeAt(0))
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'RSA-OAEP' },
+    privateKey,
+    ciphertext
+  )
+
+  return new TextDecoder().decode(decrypted)
 }

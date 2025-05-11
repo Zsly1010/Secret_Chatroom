@@ -22,6 +22,7 @@ const vm = new Vue ({
     
       // Generate keypair and join default room
       this.originPublicKey = await this.getWebWorkerResponse('generate-keys')
+      console.log('🟡 Origin Public Key (Base64):', this.originPublicKey)
       this.addNotification('Keypair Generated')
     
       // Initialize socketio
@@ -187,11 +188,11 @@ const vm = new Vue ({
         }
       },
 
-      /** Get key snippet for display purposes */
-      getKeySnippet (key) {
-        return key.slice(400, 416)
+      getKeySnippet(key) {
+        if (!key || typeof key !== 'string') return '[Invalid Key]'
+        return key.slice(-16,-7)
       },
-
+      
       /** Autoscoll DOM element to bottom */
       autoscroll (element) {
         if (element) { element.scrollTop = element.scrollHeight }
